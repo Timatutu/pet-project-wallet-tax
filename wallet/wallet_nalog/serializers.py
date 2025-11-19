@@ -3,16 +3,16 @@ from dataclasses import fields
 import email
 from django.contrib.auth import authenticate
 from rest_framework import serializers
-from .models import User, Wallet
+from .models import User, WalletSession
 
-class WalletSerializer(serializers.ModelSerializer):
+class WalletSessionSerializer(serializers.ModelSerializer):
     class Meta:
-        model = Wallet
-        fields = ['wallet_id', 'balance', 'nalog', 'status_nalog', 'created_at']
-        read_only_fields = ['wallet_id', 'created_at']
+        model = WalletSession
+        fields = ['session_key', 'wallet_address', 'wallet_type', 'connected', 'created_at', 'updated_at']
+        read_only_fields = ['session_key', 'created_at', 'updated_at']
 
 class UserSerializer(serializers.ModelSerializer):
-    wallet = WalletSerializer(read_only=True)
+    wallet = WalletSessionSerializer(read_only=True)
     
     class Meta:
         model = User
@@ -20,12 +20,30 @@ class UserSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'date_joined']
 
 class UserRegistrationSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True, min_length=8)
-    password_confirm = serializers.CharField(write_only=True)
+    password = serializers.CharField(write_only=True, min_length=8, error_messages={
+        'min_length': 'Пароль должен содержать минимум 8 символов.',
+        'required': 'Пароль обязателен для заполнения.'
+    })
+    password_confirm = serializers.CharField(write_only=True, error_messages={
+        'required': 'Подтверждение пароля обязательно.'
+    })
     
     class Meta:
         model = User
         fields = ['email', 'password', 'password_confirm']
+        extra_kwargs = {
+            'email': {
+                'error_messages': {
+                    'required': 'Email обязателен для заполнения.',
+                    'invalid': 'Введите корректный email адрес.',
+                }
+            }
+        }
+    
+    def validate_email(self, value):
+        if User.objects.filter(email=value).exists():
+            raise serializers.ValidationError("Пользователь с таким email уже существует.")
+        return value
     
     def validate(self, attrs):
         if attrs['password'] != attrs['password_confirm']:
@@ -50,7 +68,7 @@ class UserLoginSerializer(serializers.Serializer):
         attrs['user'] = user
         return attrs
         
-class WalletUpdateSerializer(serializers.ModelSerializer):
+class WalletSessionUpdateSerializer(serializers.ModelSerializer):
     class Meta:
-        model = Wallet
-        fields = ['balance', 'nalog', 'status_nalog']
+        model = WalletSession
+        fields = ['wallet_address', 'wallet_type', 'connected']
