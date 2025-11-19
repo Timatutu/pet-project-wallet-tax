@@ -33,7 +33,6 @@ class UserAdmin(BaseUserAdmin):
     )
     
     def wallet_info(self, obj):
-        """Отображает информацию о кошельке"""
         if obj.wallet:
             wallet_info = []
             if obj.wallet.wallet_address:
@@ -46,7 +45,6 @@ class UserAdmin(BaseUserAdmin):
     wallet_info.short_description = 'Информация о кошельке'
 
 
-# Регистрация модели WalletSession
 @admin.register(WalletSession)
 class WalletSessionAdmin(admin.ModelAdmin):
     list_display = ('session_key', 'wallet_address', 'wallet_type', 'connected', 'created_at', 'user_email')
@@ -73,7 +71,6 @@ class WalletSessionAdmin(admin.ModelAdmin):
     user_email.admin_order_field = 'user__email'
 
 
-# Регистрация модели TransactionHistory
 @admin.register(TransactionHistory)
 class TransactionHistoryAdmin(admin.ModelAdmin):
     list_display = ('tx_hash_short', 'wallet_address', 'amount', 'from_address_short', 'to_address_short', 'status', 'timestamp', 'created_at')
