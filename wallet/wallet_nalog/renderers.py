@@ -9,7 +9,6 @@ class UserJSONRenderer(JSONRenderer):
         if token is not None and isinstance(token, bytes):
             data['token'] = token.decode('utf-8')
         
-        # Обрабатываем tokens если они есть
         tokens = data.get('tokens', None)
         if tokens is not None:
             if isinstance(tokens, dict):
