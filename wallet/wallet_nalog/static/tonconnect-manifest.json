@@ -1,5 +1,6 @@
 {
-    "url": "https://ton-wallet-test.loca.lt",
+    "url": "http://localhost:8001",
     "name": "TON Wallet Test",
-    "iconUrl": "https://ton-wallet-test.loca.lt/static/wallet_nalog/icon.png"
+    "iconUrl": "https://ton.org/favicon.ico"
 }
+

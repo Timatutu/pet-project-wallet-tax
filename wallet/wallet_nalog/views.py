@@ -5,6 +5,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
+from pytoniq_core import Address
 from .models import WalletSession, TransactionHistory, User
 from .tonservice import save_wallet_to_db, account_info, save_transactions_to_db, get_history_transaction
 from .serializers import UserLoginSerializer, UserRegistrationSerializer, UserSerializer, WalletSessionSerializer, WalletSessionUpdateSerializer
@@ -115,10 +116,23 @@ def RefreshToken(request):
 @permission_classes([IsAuthenticated])
 def connect_wallet(request):
     if request.method == 'GET':
-        wallet_session = request.user.wallet        
+        wallet_session = request.user.wallet
         if wallet_session and wallet_session.connected:
             serializer = WalletSessionSerializer(wallet_session)
-            return Response(serializer.data, status=status.HTTP_200_OK)
+            data = serializer.data
+
+            # Нормализуем адрес кошелька в формат UQ... (base64, non-bounceable),
+            # чтобы он совпадал с адресом в Tonkeeper.
+            raw_address = wallet_session.wallet_address
+            try:
+                addr_obj = Address(raw_address)
+                friendly_address = addr_obj.to_str(is_bounceable=False)
+                data['wallet_address'] = friendly_address
+            except Exception:
+                # Если что‑то пошло не так, оставляем как есть
+                pass
+
+            return Response(data, status=status.HTTP_200_OK)
         else:
             return Response(
                 {'message': 'Кошелек не подключен', 'connected': False},
@@ -170,8 +184,12 @@ def get_tax_for_month(request):
             {'error': 'Кошелек не подключен'},
             status=status.HTTP_400_BAD_REQUEST
         )
-    
+    # Нормализуем адрес в тот же формат, в котором он хранится в БД (UQ...)
     wallet_address = wallet_session.wallet_address
+    try:
+        wallet_address = Address(wallet_address).to_str(is_bounceable=False)
+    except Exception:
+        pass
     
     year = request.query_params.get('year')
     month = request.query_params.get('month')
@@ -217,8 +235,12 @@ def get_tax_for_all_months(request):
             {'error': 'Кошелек не подключен'},
             status=status.HTTP_400_BAD_REQUEST
         )
-    
+    # Нормализуем адрес в формат UQ..., чтобы совпадал с записями TransactionHistory
     wallet_address = wallet_session.wallet_address
+    try:
+        wallet_address = Address(wallet_address).to_str(is_bounceable=False)
+    except Exception:
+        pass
     
     start_year = request.query_params.get('start_year')
     start_month = request.query_params.get('start_month')
@@ -267,8 +289,12 @@ def get_total_tax(request):
             {'error': 'Кошелек не подключен'},
             status=status.HTTP_400_BAD_REQUEST
         )
-    
+    # Нормализуем адрес в формат UQ..., как в TransactionHistory
     wallet_address = wallet_session.wallet_address
+    try:
+        wallet_address = Address(wallet_address).to_str(is_bounceable=False)
+    except Exception:
+        pass
     start_year = request.query_params.get('start_year')
     start_month = request.query_params.get('start_month')
     
@@ -351,20 +377,27 @@ def get_wallet_transactions(request):
         )
     
     wallet_address = wallet_session.wallet_address
-    
-    # Проверяем, нужно ли принудительное обновление
     force_refresh = request.query_params.get('refresh', 'false').lower() == 'true'
     
     try:
         logger.info(f"Запрос транзакций для адреса: {wallet_address}, force_refresh: {force_refresh}")
-        
-        # Если не требуется принудительное обновление, сначала получаем транзакции из БД (быстро)
+        # Нормализуем адрес в удобный формат (UQ...) и дальше ВСЮДЫ используем его –
+        # и для выборки из БД, и для сохранения, и для ответа фронту.
+        def normalize_address(addr: str) -> str:
+            if not addr:
+                return ''
+            try:
+                return Address(addr).to_str(is_bounceable=False)
+            except Exception:
+                return addr
+
+        normalized_wallet_address = normalize_address(wallet_address)
+
         if not force_refresh:
             db_transactions = TransactionHistory.objects.filter(
-                wallet_address=wallet_address
+                wallet_address=normalized_wallet_address
             ).order_by('-timestamp')[:50]
             
-            # Если есть транзакции в БД, возвращаем их сразу
             if db_transactions.exists():
                 transactions_data = []
                 for tx in db_transactions:
@@ -373,26 +406,24 @@ def get_wallet_transactions(request):
                         'timestamp': tx.timestamp.isoformat() if tx.timestamp else None,
                         'amount': float(tx.amount),
                         'amount_ton': f"{tx.amount:.9f}",
-                        'from_address': tx.from_address,
-                        'to_address': tx.to_address,
+                        'from_address': normalize_address(tx.from_address),
+                        'to_address': normalize_address(tx.to_address),
                         'status': tx.status,
                         'created_at': tx.created_at.isoformat() if tx.created_at else None,
                     })
                 
                 logger.info(f"Возвращаем {len(transactions_data)} транзакций из БД")
                 
-                # Обновляем транзакции в фоне (не блокируем ответ)
                 def update_transactions_background():
                     try:
-                        logger.info(f"Начало фонового обновления транзакций для {wallet_address}")
-                        transactions = asyncio.run(get_history_transaction(wallet_address))
+                        logger.info(f"Начало фонового обновления транзакций для {normalized_wallet_address}")
+                        transactions = asyncio.run(get_history_transaction(normalized_wallet_address))
                         logger.info(f"Получено транзакций из блокчейна: {len(transactions)}")
-                        saved_count = save_transactions_to_db(wallet_address, transactions)
+                        saved_count = save_transactions_to_db(normalized_wallet_address, transactions)
                         logger.info(f"Сохранено транзакций в БД: {saved_count}")
                     except Exception as e:
                         logger.error(f"Ошибка при обновлении транзакций в фоне: {e}", exc_info=True)
                 
-                # Запускаем обновление в отдельном потоке
                 thread = threading.Thread(target=update_transactions_background, daemon=True)
                 thread.start()
                 
@@ -404,18 +435,15 @@ def get_wallet_transactions(request):
                     'from_cache': True
                 }, status=status.HTTP_200_OK)
         
-        # Если транзакций в БД нет, загружаем из блокчейна
         logger.info("Транзакций в БД нет, загружаем из блокчейна...")
-        transactions = asyncio.run(get_history_transaction(wallet_address))
+        transactions = asyncio.run(get_history_transaction(normalized_wallet_address))
         logger.info(f"Получено транзакций из блокчейна: {len(transactions)}")
         
-        # Сохраняем транзакции в БД
-        saved_count = save_transactions_to_db(wallet_address, transactions)
+        saved_count = save_transactions_to_db(normalized_wallet_address, transactions)
         logger.info(f"Сохранено транзакций в БД: {saved_count}")
         
-        # Получаем транзакции из БД
         db_transactions = TransactionHistory.objects.filter(
-            wallet_address=wallet_address
+            wallet_address=normalized_wallet_address
         ).order_by('-timestamp')[:50]
         
         logger.info(f"Транзакций в БД для адреса {wallet_address}: {db_transactions.count()}")
@@ -427,8 +455,8 @@ def get_wallet_transactions(request):
                 'timestamp': tx.timestamp.isoformat() if tx.timestamp else None,
                 'amount': float(tx.amount),
                 'amount_ton': f"{tx.amount:.9f}",
-                'from_address': tx.from_address,
-                'to_address': tx.to_address,
+                'from_address': normalize_address(tx.from_address),
+                'to_address': normalize_address(tx.to_address),
                 'status': tx.status,
                 'created_at': tx.created_at.isoformat() if tx.created_at else None,
             })

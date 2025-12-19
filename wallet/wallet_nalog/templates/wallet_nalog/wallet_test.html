@@ -265,6 +265,48 @@
             flex-wrap: wrap;
         }
 
+        /* Карточки сделок для налога */
+        .deal-cards {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .deal-card {
+            flex: 1 1 220px;
+            background: #f8f9ff;
+            border-radius: 10px;
+            padding: 10px 12px;
+            border-left: 4px solid #0088cc;
+            font-size: 0.9em;
+        }
+
+        .deal-card.deal-buy {
+            border-left-color: #4caf50;
+        }
+
+        .deal-card.deal-sell {
+            border-left-color: #dc3545;
+        }
+
+        .deal-type {
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .deal-amount {
+            font-weight: 600;
+        }
+
+        .deal-profit.profit-positive {
+            color: #4caf50;
+        }
+
+        .deal-profit.profit-negative {
+            color: #dc3545;
+        }
+
         @media (max-width: 768px) {
             .container {
                 margin: 10px;
@@ -338,6 +380,14 @@
                 <h2 class="section-title">Транзакции</h2>
                 <div id="transactionsContainer">
                     <div class="loading">Транзакции будут отображены здесь</div>
+                </div>
+
+                <!-- Отдельное окно только для сделок покупка/продажа (вымышленных примеров) -->
+                <div style="margin-top:20px;">
+                    <h3 class="section-title" style="font-size:18px;">Учебные сделки (покупка/продажа)</h3>
+                    <div id="demoTransactionsContainer">
+                        <div class="loading">После расчёта налога за месяц здесь появятся примеры сделок.</div>
+                    </div>
                 </div>
             </div>
 
@@ -683,6 +733,9 @@
             }
         }
 
+        // Глобальный кэш вымышленных сделок (заполняется при расчёте налога)
+        let demoDealsCache = [];
+
         async function loadTransactions(forceRefresh = false) {
             if (!accessToken) return;
 
@@ -721,7 +774,25 @@
                     console.log(`Отображаем ${data.transactions.length} транзакций`);
                     container.innerHTML = '';
                     
-                    data.transactions.forEach((tx, index) => {
+                    const allTx = [...data.transactions];
+
+                    // Добавляем в общий список вымышленные сделки как отдельные "транзакции"
+                    if (demoDealsCache && demoDealsCache.length) {
+                        demoDealsCache.forEach((d, idx) => {
+                            allTx.push({
+                                tx_hash: `demo-${idx}`,
+                                timestamp: null,
+                                amount_ton: d.amount_ton,
+                                from_address: d.operation_type === 'buy' ? 'DEMO-EXCHANGE' : walletAddress,
+                                to_address: d.operation_type === 'buy' ? walletAddress : 'DEMO-EXCHANGE',
+                                status: 'DEMO',
+                                _is_demo: true,
+                                _demo_label: d.operation_type === 'buy' ? 'Демо покупка' : 'Демо продажа',
+                            });
+                        });
+                    }
+
+                    allTx.forEach((tx, index) => {
                         try {
                             // Нормализуем адреса для сравнения (убираем пробелы, приводим к нижнему регистру)
                             const normalizeAddress = (addr) => {
@@ -730,7 +801,7 @@
                             };
                             const isOutgoing = normalizeAddress(tx.from_address) === normalizeAddress(walletAddress);
                             const txDiv = document.createElement('div');
-                            txDiv.className = `transaction-item ${isOutgoing ? 'outgoing' : 'incoming'}`;
+                            txDiv.className = `transaction-item ${isOutgoing ? 'outgoing' : 'incoming'} ${tx._is_demo ? 'demo-transaction' : ''}`;
                             
                             let dateStr = 'Неизвестно';
                             try {
@@ -753,7 +824,9 @@
                                         <div class="transaction-date">${dateStr}</div>
                                     </div>
                                     <div>
-                                        <div style="font-size: 0.9em; color: #666;">${isOutgoing ? 'Исходящая' : 'Входящая'}</div>
+                                        <div style="font-size: 0.9em; color: #666;">
+                                            ${tx._is_demo ? (tx._demo_label || 'Демо сделка') : (isOutgoing ? 'Исходящая' : 'Входящая')}
+                                        </div>
                                         <div style="font-size: 0.8em; color: #999;">${tx.status || 'Успешно'}</div>
                                     </div>
                                 </div>
@@ -818,12 +891,80 @@
 
                 // Структура ответа см. tax_calculator.calculate_tax_for_month
                 const tax = data;
+
+                // Вымышленные (демо) сделки приходят с бэкенда в поле demo_deals
+                const demoDeals = (tax.demo_deals || []).filter(
+                    d => Math.abs(parseFloat(d.amount_ton || 0)) >= 100
+                );
+                // Кладём в глобальный кэш для отображения вперемешку с реальными транзакциями
+                demoDealsCache = demoDeals;
+
+                const examplesHtml = (() => {
+                    let html = '<div style="margin-top:10px;"><strong>Примеры крупных сделок (≥ 100 TON, макс. 5):</strong>';
+                    html += '<div class="deal-cards">';
+                    demoDeals.forEach((t) => {
+                        const isBuy = t.operation_type === 'buy';
+                        const type = isBuy ? 'Покупка (11.12)' : 'Продажа (12.12)';
+                        const cardClass = isBuy ? 'deal-buy' : 'deal-sell';
+                        const amountTon = Number(t.amount_ton || 0);
+                        const amountUsd = Number(t.amount_usd || 0);
+                        const profitUsd = Number(t.profit_usd || 0);
+                        const taxUsd = Number(t.tax_amount_usd || 0);
+                        const signProfit = profitUsd >= 0 ? '+' : '-';
+                        const profitAbs = Math.abs(profitUsd).toFixed(2);
+                        const profitClass = profitUsd >= 0 ? 'profit-positive' : 'profit-negative';
+                        html += `
+                            <div class="deal-card ${cardClass}">
+                                <div class="deal-type">${type}</div>
+                                <div class="deal-amount">Объём: ${amountTon.toFixed(2)} TON (${amountUsd.toFixed(2)} USD)</div>
+                                <div class="deal-profit ${profitClass}">Профит по сделке: ${signProfit}${profitAbs} USD</div>
+                                <div>Налог (5% от прибыли): ${taxUsd.toFixed(2)} USD</div>
+                            </div>
+                        `;
+                    });
+                    html += '</div></div>';
+                    return html;
+                })();
+
+                // Обновляем отдельное окно учебных сделок под списком транзакций
+                const demoBox = document.getElementById('demoTransactionsContainer');
+                if (demoBox) {
+                    if (!demoDeals.length) {
+                        demoBox.innerHTML = '<div class="loading">Для выбранного месяца демо-сделок нет.</div>';
+                    } else {
+                        let html = '<div class="deal-cards">';
+                        demoDeals.forEach((t) => {
+                            const isBuy = t.operation_type === 'buy';
+                            const type = isBuy ? 'Покупка (11.12)' : 'Продажа (12.12)';
+                            const cardClass = isBuy ? 'deal-buy' : 'deal-sell';
+                            const amountTon = Number(t.amount_ton || 0);
+                            const amountUsd = Number(t.amount_usd || 0);
+                            const profitUsd = Number(t.profit_usd || 0);
+                            const taxUsd = Number(t.tax_amount_usd || 0);
+                            const signUsd = profitUsd >= 0 ? '+' : '-';
+                            const absProfitUsd = Math.abs(profitUsd).toFixed(2);
+                            const profitClass = profitUsd >= 0 ? 'profit-positive' : 'profit-negative';
+                            html += `
+                                <div class="deal-card ${cardClass}">
+                                    <div class="deal-type">${type}</div>
+                                    <div class="deal-amount">Объём: ${amountTon.toFixed(2)} TON (${amountUsd.toFixed(2)} USD)</div>
+                                    <div class="deal-profit ${profitClass}">Профит по сделке: ${signUsd}${absProfitUsd} USD</div>
+                                    <div>Налог (5% от прибыли): ${taxUsd.toFixed(2)} USD</div>
+                                </div>
+                            `;
+                        });
+                        html += '</div>';
+                        demoBox.innerHTML = html;
+                    }
+                }
+
                 resultDiv.innerHTML = `
                     <div class="success">
                         <strong>Налог за ${month}.${year}</strong><br>
                         Объём исходящих переводов: ${tax.total_sent_ton ?? 0} TON (${tax.total_sent_usd ?? 0} USD)<br>
                         Количество транзакций: ${tax.transactions_count ?? 0}<br>
                         Налог к уплате: ${tax.total_tax_ton ?? 0} TON (${tax.total_tax_usd ?? 0} USD)
+                        ${examplesHtml}
                     </div>
                 `;
             } catch (error) {
@@ -913,6 +1054,7 @@
                 }
 
                 const tax = data;
+                console.log('TOTAL TAX RESPONSE', tax);
                 resultDiv.innerHTML = `
                     <div class="success">
                         <strong>Итоговый налог</strong><br>
@@ -948,12 +1090,45 @@
                 monthInput.value = m;
             }
 
+            // Вымышленные (демо) сделки берём из ответа бэкенда
+            const demoDeals = (item.demo_deals || []).filter(
+                d => Math.abs(parseFloat(d.amount_ton || 0)) >= 100
+            );
+
+            const examplesHtml = (() => {
+                let html = '<div style="margin-top:10px;"><strong>Примеры крупных сделок (≥ 100 TON, макс. 5):</strong>';
+                html += '<div class="deal-cards">';
+                demoDeals.forEach((t) => {
+                    const isBuy = t.operation_type === 'buy';
+                    const type = isBuy ? 'Покупка (11.12)' : 'Продажа (12.12)';
+                    const cardClass = isBuy ? 'deal-buy' : 'deal-sell';
+                    const amountTon = Number(t.amount_ton || 0);
+                    const amountUsd = Number(t.amount_usd || 0);
+                    const profitUsd = Number(t.profit_usd || 0);
+                    const taxUsd = Number(t.tax_amount_usd || 0);
+                    const signUsd = profitUsd >= 0 ? '+' : '-';
+                    const absProfitUsd = Math.abs(profitUsd).toFixed(2);
+                    const profitClass = profitUsd >= 0 ? 'profit-positive' : 'profit-negative';
+                    html += `
+                        <div class="deal-card ${cardClass}">
+                            <div class="deal-type">${type}</div>
+                            <div class="deal-amount">Объём: ${amountTon.toFixed(2)} TON (${amountUsd.toFixed(2)} USD)</div>
+                            <div class="deal-profit ${profitClass}">Профит по сделке: ${signUsd}${absProfitUsd} USD</div>
+                            <div>Налог (5% от прибыли): ${taxUsd.toFixed(2)} USD</div>
+                        </div>
+                    `;
+                });
+                html += '</div></div>';
+                return html;
+            })();
+
             resultDiv.innerHTML = `
                 <div class="success">
                     <strong>Налог за ${m}.${y}</strong><br>
                     Объём исходящих переводов: ${item.total_sent_ton ?? 0} TON (${item.total_sent_usd ?? 0} USD)<br>
                     Количество транзакций: ${item.transactions_count ?? 0}<br>
                     Налог к уплате: ${item.total_tax_ton ?? 0} TON (${item.total_tax_usd ?? 0} USD)
+                    ${examplesHtml}
                 </div>
             `;
         }

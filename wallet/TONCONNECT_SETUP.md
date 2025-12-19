@@ -65,6 +65,8 @@ cd C:\wallet_project
 
 **Вариант Б** - если ngrok.exe в другой папке (например, C:\ngrok):
 ```powershell
+
+
 cd C:\ngrok
 .\ngrok.exe http 8000
 ```

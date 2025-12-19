@@ -33,8 +33,7 @@ ALLOWED_HOSTS = ['*']
 # Application definition
 
 INSTALLED_APPS = [
-    'unfold',  # django-unfold должен быть перед django.contrib.admin
-    'unfold.contrib.filters',  # Дополнительные фильтры
+    'unfold',  # Красивый интерфейс админки
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',

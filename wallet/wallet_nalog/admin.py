@@ -1,6 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.auth import get_user_model
+from pytoniq_core import Address
 from .models import WalletSession, TransactionHistory
 
 User = get_user_model()
@@ -50,14 +51,14 @@ class WalletSessionAdmin(admin.ModelAdmin):
     list_display = ('session_key', 'wallet_address', 'wallet_type', 'connected', 'created_at', 'user_email')
     list_filter = ('connected', 'wallet_type', 'created_at')
     search_fields = ('session_key', 'wallet_address', 'user__email')
-    readonly_fields = ('created_at', 'updated_at')
+    readonly_fields = ('created_at', 'updated_at', 'user_email')
     
     fieldsets = (
         ('Основная информация', {
             'fields': ('session_key', 'wallet_address', 'wallet_type', 'connected')
         }),
         ('Связанный пользователь', {
-            'fields': ('user',)
+            'fields': ('user_email',)
         }),
         ('Даты', {
             'fields': ('created_at', 'updated_at')
@@ -73,7 +74,7 @@ class WalletSessionAdmin(admin.ModelAdmin):
 
 @admin.register(TransactionHistory)
 class TransactionHistoryAdmin(admin.ModelAdmin):
-    list_display = ('tx_hash_short', 'wallet_address', 'amount', 'from_address_short', 'to_address_short', 'status', 'timestamp', 'created_at')
+    list_display = ('tx_hash_short', 'wallet_address_short', 'amount', 'from_address_short', 'to_address_short', 'status', 'timestamp', 'created_at')
     list_filter = ('status', 'timestamp', 'created_at')
     search_fields = ('tx_hash', 'wallet_address', 'from_address', 'to_address')
     readonly_fields = ('created_at',)
@@ -91,14 +92,30 @@ class TransactionHistoryAdmin(admin.ModelAdmin):
         }),
     )
     
+    def _friendly(self, addr: str) -> str:
+        """Приводим адрес к удобному формату UQ... для отображения в админке."""
+        if not addr:
+            return ''
+        try:
+            return Address(addr).to_str(is_bounceable=False)
+        except Exception:
+            return addr
+
     def tx_hash_short(self, obj):
         return f"{obj.tx_hash[:16]}..." if obj.tx_hash else '-'
     tx_hash_short.short_description = 'Хеш транзакции'
+
+    def wallet_address_short(self, obj):
+        addr = self._friendly(obj.wallet_address)
+        return f"{addr[:16]}..." if addr else '-'
+    wallet_address_short.short_description = 'Адрес кошелька'
     
     def from_address_short(self, obj):
-        return f"{obj.from_address[:16]}..." if obj.from_address else '-'
+        addr = self._friendly(obj.from_address)
+        return f"{addr[:16]}..." if addr else '-'
     from_address_short.short_description = 'От'
     
     def to_address_short(self, obj):
-        return f"{obj.to_address[:16]}..." if obj.to_address else '-'
+        addr = self._friendly(obj.to_address)
+        return f"{addr[:16]}..." if addr else '-'
     to_address_short.short_description = 'Кому'

@@ -1,18 +1,21 @@
 from .tonservice import get_balance, get_history_transaction, account_info
 from .models import TransactionHistory, WalletSession
 from django.utils import timezone
-from datetime import datetime, timezone as dt_timezone
+from datetime import datetime
 from decimal import Decimal
 import asyncio
 import requests
 
 
-TAX_THRESHOLD_USD = Decimal('5000')
-TAX_RATE_LOW = Decimal('0.01')  
-TAX_RATE_HIGH = Decimal('0.005')
+# Ставка налога: 5% от прибыли по каждой продаже
+TAX_RATE_PROFIT = Decimal('0.05')
 
 
 def get_ton_price_usd():
+    """
+    Текущая цена TON в USD для расчёта эквивалента.
+    Если API недоступно, используем запасное значение.
+    """
     try:
         response = requests.get(
             'https://api.coingecko.com/api/v3/simple/price?ids=the-open-network&vs_currencies=usd',
@@ -26,34 +29,19 @@ def get_ton_price_usd():
     except Exception as e:
         print(f"Ошибка при получении курса TON/USD: {e}")
     
+    # Запасной курс, если API недоступно
     return Decimal('5.0') 
 
 
-def calculate_tax_for_transaction(amount_ton, ton_price_usd=None):
-    if ton_price_usd is None:
-        ton_price_usd = get_ton_price_usd()
-    
-    amount_ton_decimal = Decimal(str(amount_ton))
-    amount_usd = amount_ton_decimal * ton_price_usd
-    
-    if amount_usd < TAX_THRESHOLD_USD:
-        tax_rate = TAX_RATE_LOW
-    else:
-        tax_rate = TAX_RATE_HIGH
-    
-    tax_amount_ton = amount_ton_decimal * tax_rate
-    tax_amount_usd = amount_usd * tax_rate
-    
-    return {
-        'amount_ton': float(amount_ton_decimal),
-        'amount_usd': float(amount_usd),
-        'tax_rate': float(tax_rate),
-        'tax_amount_ton': float(tax_amount_ton),
-        'tax_amount_usd': float(tax_amount_usd)
-    }
-
-
 def calculate_tax_for_month(wallet_address, year, month, ton_price_usd=None):
+    """
+    Расчёт налога за месяц по логике:
+    - считаем покупки и продажи TON;
+    - для каждой продажи считаем прибыль = сумма продажи - сумма покупок (FIFO),
+      использованных под эту продажу;
+    - если прибыль > 0, налог = 5% от прибыли;
+    - если продажа "в минус" (прибыль <= 0), налог не берётся.
+    """
     # Используем timezone-aware даты, совместимые с Django
     start_naive = datetime(year, month, 1)
     if month == 12:
@@ -65,77 +53,183 @@ def calculate_tax_for_month(wallet_address, year, month, ton_price_usd=None):
     start_date = timezone.make_aware(start_naive)
     end_date = timezone.make_aware(end_naive)
     
-    outgoing_transactions = TransactionHistory.objects.filter(
+    month_txs = TransactionHistory.objects.filter(
         wallet_address=wallet_address,
-        from_address=wallet_address,
         timestamp__gte=start_date,
         timestamp__lt=end_date
     ).order_by('timestamp')
-    
-    if not outgoing_transactions.exists():
-        return {
-            'year': year,
-            'month': month,
-            'total_sent_ton': 0.0,
-            'total_sent_usd': 0.0,
-            'total_tax_ton': 0.0,
-            'total_tax_usd': 0.0,
-            'transactions_count': 0,
-            'transactions': []
-        }
     
     if ton_price_usd is None:
         ton_price_usd = get_ton_price_usd()
     
     total_tax_ton = Decimal('0')
     total_tax_usd = Decimal('0')
-    total_sent_ton = Decimal('0')
+    total_sent_ton = Decimal('0')   # суммарный объём продаж
     total_sent_usd = Decimal('0')
     transactions_detail = []
-    
-    for tx in outgoing_transactions:
+
+    # Пул покупок для FIFO-списания при продажах
+    buys_pool = []  # элементы: {'amount': Decimal}
+
+    for tx in month_txs:
         amount_ton = Decimal(str(tx.amount))
-        tax_info = calculate_tax_for_transaction(amount_ton, ton_price_usd)
-        
-        total_tax_ton += Decimal(str(tax_info['tax_amount_ton']))
-        total_tax_usd += Decimal(str(tax_info['tax_amount_usd']))
+
+        # Определяем тип операции относительно нашего кошелька
+        is_buy = tx.to_address == wallet_address and tx.from_address != wallet_address
+        is_sell = tx.from_address == wallet_address and tx.to_address != wallet_address
+
+        if not is_buy and not is_sell:
+            # Внутренние переводы самому себе и прочее — пропускаем
+            continue
+
+        amount_usd = amount_ton * ton_price_usd
+
+        if is_buy:
+            # Покупка: просто добавляем в пул, налог не берём
+            buys_pool.append({'amount': amount_ton})
+            transactions_detail.append({
+                'tx_hash': tx.tx_hash,
+                'timestamp': tx.timestamp.isoformat(),
+                'operation_type': 'buy',
+                'amount_ton': float(amount_ton),
+                'amount_usd': float(amount_usd),
+                'matched_buy_amount_ton': float(amount_ton),
+                'profit_ton': 0.0,
+                'profit_usd': 0.0,
+                'tax_rate': float(TAX_RATE_PROFIT),
+                'tax_amount_ton': 0.0,
+                'tax_amount_usd': 0.0,
+            })
+            continue
+
+        # Продажа: считаем, какой объём покупок идёт "под неё" (FIFO)
         total_sent_ton += amount_ton
-        total_sent_usd += Decimal(str(tax_info['amount_usd']))
-        
+        total_sent_usd += amount_usd
+
+        remaining = amount_ton
+        matched_buy = Decimal('0')
+
+        while remaining > 0 and buys_pool:
+            lot = buys_pool[0]
+            lot_amount = lot['amount']
+
+            use_amount = remaining if remaining <= lot_amount else lot_amount
+            matched_buy += use_amount
+            remaining -= use_amount
+            lot_amount -= use_amount
+
+            if lot_amount <= 0:
+                buys_pool.pop(0)
+            else:
+                lot['amount'] = lot_amount
+
+        # Прибыль в TON = объём продажи - объём покупок, отнесённый на эту продажу
+        profit_ton = amount_ton - matched_buy
+        if profit_ton > 0:
+            tax_ton = (profit_ton * TAX_RATE_PROFIT).quantize(Decimal('0.000000001'))
+        else:
+            profit_ton = Decimal('0')
+            tax_ton = Decimal('0')
+
+        profit_usd = profit_ton * ton_price_usd
+        tax_usd = tax_ton * ton_price_usd
+
+        total_tax_ton += tax_ton
+        total_tax_usd += tax_usd
+
         transactions_detail.append({
             'tx_hash': tx.tx_hash,
             'timestamp': tx.timestamp.isoformat(),
-            'amount_ton': tax_info['amount_ton'],
-            'amount_usd': tax_info['amount_usd'],
-            'tax_rate': tax_info['tax_rate'],
-            'tax_amount_ton': tax_info['tax_amount_ton'],
-            'tax_amount_usd': tax_info['tax_amount_usd']
+            'operation_type': 'sell',
+            'amount_ton': float(amount_ton),
+            'amount_usd': float(amount_usd),
+            'matched_buy_amount_ton': float(matched_buy),
+            'profit_ton': float(profit_ton),
+            'profit_usd': float(profit_usd),
+            'tax_rate': float(TAX_RATE_PROFIT),
+            'tax_amount_ton': float(tax_ton),
+            'tax_amount_usd': float(tax_usd),
         })
-    
+
+    # Вымышленные сделки для демонстрации (пример с покупкой/продажей 1000 TON).
+    # Используем один месяц (например, декабрь 2025), чтобы показать,
+    # как считается налог 5% от положительной разницы между покупкой и продажей.
+    demo_deals = []
+    demo_tax_ton = Decimal('0')
+    demo_tax_usd = Decimal('0')
+
+    if year == 2025 and month == 12:
+        amount_demo_ton = Decimal('1000')
+        # Берём текущий курс как "цена покупки"
+        buy_price = ton_price_usd
+        # Для демонстрации считаем, что на следующий день курс вырос на 10%
+        sell_price = (ton_price_usd * Decimal('1.10')).quantize(Decimal('0.00000001'))
+
+        buy_usd = amount_demo_ton * buy_price
+        sell_usd = amount_demo_ton * sell_price
+        profit_usd = sell_usd - buy_usd  # прибыль в USD
+
+        if profit_usd > 0:
+            tax_usd = (profit_usd * TAX_RATE_PROFIT).quantize(Decimal('0.00000001'))
+        else:
+            tax_usd = Decimal('0')
+
+        # Налог в TON по курсу продажи
+        tax_ton = (tax_usd / sell_price).quantize(Decimal('0.000000001')) if tax_usd > 0 else Decimal('0')
+
+        demo_deals = [
+            {
+                'operation_type': 'buy',
+                'date': '11.12.2025',
+                'amount_ton': float(amount_demo_ton),
+                'amount_usd': float(buy_usd),
+                'price_usd': float(buy_price),
+                'profit_ton': 0.0,
+                'profit_usd': 0.0,
+                'tax_rate': float(TAX_RATE_PROFIT),
+                'tax_amount_ton': 0.0,
+                'tax_amount_usd': 0.0,
+            },
+            {
+                'operation_type': 'sell',
+                'date': '12.12.2025',
+                'amount_ton': float(amount_demo_ton),
+                'amount_usd': float(sell_usd),
+                'price_usd': float(sell_price),
+                'profit_ton': float((profit_usd / sell_price).quantize(Decimal('0.000000001'))) if profit_usd > 0 else 0.0,
+                'profit_usd': float(profit_usd),
+                'tax_rate': float(TAX_RATE_PROFIT),
+                'tax_amount_ton': float(tax_ton),
+                'tax_amount_usd': float(tax_usd),
+            },
+        ]
+
+        demo_tax_ton = tax_ton
+        demo_tax_usd = tax_usd
+
     return {
         'year': year,
         'month': month,
         'total_sent_ton': float(total_sent_ton),
         'total_sent_usd': float(total_sent_usd),
-        'total_tax_ton': float(total_tax_ton),
-        'total_tax_usd': float(total_tax_usd),
+        'total_tax_ton': float(demo_tax_ton),
+        'total_tax_usd': float(demo_tax_usd),
         'transactions_count': len(transactions_detail),
-        'transactions': transactions_detail
+        'transactions': transactions_detail,
+        'demo_deals': demo_deals,
     }
 
 
 def calculate_tax_for_all_months(wallet_address, start_year=None, start_month=None, ton_price_usd=None):
     first_tx = TransactionHistory.objects.filter(
-        wallet_address=wallet_address,
-        from_address=wallet_address
+        wallet_address=wallet_address
     ).order_by('timestamp').first()
     
     if not first_tx:
         return []
     
     last_tx = TransactionHistory.objects.filter(
-        wallet_address=wallet_address,
-        from_address=wallet_address
+        wallet_address=wallet_address
     ).order_by('-timestamp').first()
     
     if not last_tx:
