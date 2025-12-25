@@ -10,12 +10,14 @@ from .views import (
     get_wallet_balance,
     get_wallet_transactions,
     wallet_test_page,
+    index_page,
     tonconnect_manifest
 )
 from .tonservice import account_info
 
 urlpatterns = [
-    path('', wallet_test_page, name='wallet_test'),
+    path('', index_page, name='index'),
+    path('app/', index_page, name='app'),
     path('test/', wallet_test_page, name='wallet_test'),
     path('tonconnect-manifest.json', tonconnect_manifest, name='tonconnect_manifest'),
     path('register/', Registration, name='register'),

@@ -21,6 +21,9 @@ logger = logging.getLogger(__name__)
 def wallet_test_page(request):
     return render(request, 'wallet_nalog/wallet_test.html')
 
+def index_page(request):
+    return render(request, 'wallet_nalog/index.html')
+
 def tonconnect_manifest(request):
     # Обработка OPTIONS запроса для CORS preflight
     if request.method == 'OPTIONS':
