@@ -151,36 +151,34 @@ def calculate_tax_for_month(wallet_address, year, month, ton_price_usd=None):
             'tax_amount_usd': float(tax_usd),
         })
 
-    # Вымышленные сделки для демонстрации (пример с покупкой/продажей 1000 TON).
-    # Используем один месяц (например, декабрь 2025), чтобы показать,
+    # Вымышленные сделки для демонстрации (пример с покупкой/продажей).
+    # Используем разные месяцы, чтобы показать,
     # как считается налог 5% от положительной разницы между покупкой и продажей.
     demo_deals = []
     demo_tax_ton = Decimal('0')
     demo_tax_usd = Decimal('0')
 
-    if year == 2025 and month == 12:
-        amount_demo_ton = Decimal('1000')
-        # Берём текущий курс как "цена покупки"
+    # Август 2025: покупка 12 августа 5000 TON, продажа 25 августа 5000 TON
+    if year == 2025 and month == 8:
+        amount_demo_ton = Decimal('5000')
         buy_price = ton_price_usd
-        # Для демонстрации считаем, что на следующий день курс вырос на 10%
-        sell_price = (ton_price_usd * Decimal('1.10')).quantize(Decimal('0.00000001'))
-
+        sell_price = (ton_price_usd * Decimal('1.10')).quantize(Decimal('0.00000001'))  # рост 10%
+        
         buy_usd = amount_demo_ton * buy_price
         sell_usd = amount_demo_ton * sell_price
-        profit_usd = sell_usd - buy_usd  # прибыль в USD
-
+        profit_usd = sell_usd - buy_usd
+        
         if profit_usd > 0:
             tax_usd = (profit_usd * TAX_RATE_PROFIT).quantize(Decimal('0.00000001'))
         else:
             tax_usd = Decimal('0')
-
-        # Налог в TON по курсу продажи
+        
         tax_ton = (tax_usd / sell_price).quantize(Decimal('0.000000001')) if tax_usd > 0 else Decimal('0')
-
+        
         demo_deals = [
             {
                 'operation_type': 'buy',
-                'date': '11.12.2025',
+                'date': '12.08.2025',
                 'amount_ton': float(amount_demo_ton),
                 'amount_usd': float(buy_usd),
                 'price_usd': float(buy_price),
@@ -192,7 +190,7 @@ def calculate_tax_for_month(wallet_address, year, month, ton_price_usd=None):
             },
             {
                 'operation_type': 'sell',
-                'date': '12.12.2025',
+                'date': '25.08.2025',
                 'amount_ton': float(amount_demo_ton),
                 'amount_usd': float(sell_usd),
                 'price_usd': float(sell_price),
@@ -203,9 +201,186 @@ def calculate_tax_for_month(wallet_address, year, month, ton_price_usd=None):
                 'tax_amount_usd': float(tax_usd),
             },
         ]
-
+        
         demo_tax_ton = tax_ton
         demo_tax_usd = tax_usd
+        
+        # Добавляем объем продаж из демо-сделок к total_sent
+        for deal in demo_deals:
+            if deal['operation_type'] == 'sell':
+                total_sent_ton += Decimal(str(deal['amount_ton']))
+                total_sent_usd += Decimal(str(deal['amount_usd']))
+    
+    # Сентябрь 2025: покупка 1 сентября 7500 TON, продажа 19 сентября 7500 TON
+    elif year == 2025 and month == 9:
+        amount_demo_ton = Decimal('7500')
+        buy_price = ton_price_usd
+        sell_price = (ton_price_usd * Decimal('1.10')).quantize(Decimal('0.00000001'))  # рост 10%
+        
+        buy_usd = amount_demo_ton * buy_price
+        sell_usd = amount_demo_ton * sell_price
+        profit_usd = sell_usd - buy_usd
+        
+        if profit_usd > 0:
+            tax_usd = (profit_usd * TAX_RATE_PROFIT).quantize(Decimal('0.00000001'))
+        else:
+            tax_usd = Decimal('0')
+        
+        tax_ton = (tax_usd / sell_price).quantize(Decimal('0.000000001')) if tax_usd > 0 else Decimal('0')
+        
+        demo_deals = [
+            {
+                'operation_type': 'buy',
+                'date': '01.09.2025',
+                'amount_ton': float(amount_demo_ton),
+                'amount_usd': float(buy_usd),
+                'price_usd': float(buy_price),
+                'profit_ton': 0.0,
+                'profit_usd': 0.0,
+                'tax_rate': float(TAX_RATE_PROFIT),
+                'tax_amount_ton': 0.0,
+                'tax_amount_usd': 0.0,
+            },
+            {
+                'operation_type': 'sell',
+                'date': '19.09.2025',
+                'amount_ton': float(amount_demo_ton),
+                'amount_usd': float(sell_usd),
+                'price_usd': float(sell_price),
+                'profit_ton': float((profit_usd / sell_price).quantize(Decimal('0.000000001'))) if profit_usd > 0 else 0.0,
+                'profit_usd': float(profit_usd),
+                'tax_rate': float(TAX_RATE_PROFIT),
+                'tax_amount_ton': float(tax_ton),
+                'tax_amount_usd': float(tax_usd),
+            },
+        ]
+        
+        demo_tax_ton = tax_ton
+        demo_tax_usd = tax_usd
+        
+        # Добавляем объем продаж из демо-сделок к total_sent
+        for deal in demo_deals:
+            if deal['operation_type'] == 'sell':
+                total_sent_ton += Decimal(str(deal['amount_ton']))
+                total_sent_usd += Decimal(str(deal['amount_usd']))
+    
+    # Ноябрь 2025: покупка 6 ноября 10000 TON (продажа будет в декабре)
+    elif year == 2025 and month == 11:
+        amount_demo_ton = Decimal('10000')
+        buy_price = ton_price_usd
+        
+        buy_usd = amount_demo_ton * buy_price
+        
+        demo_deals = [
+            {
+                'operation_type': 'buy',
+                'date': '06.11.2025',
+                'amount_ton': float(amount_demo_ton),
+                'amount_usd': float(buy_usd),
+                'price_usd': float(buy_price),
+                'profit_ton': 0.0,
+                'profit_usd': 0.0,
+                'tax_rate': float(TAX_RATE_PROFIT),
+                'tax_amount_ton': 0.0,
+                'tax_amount_usd': 0.0,
+            },
+        ]
+        
+        # В ноябре только покупка, налога нет
+        demo_tax_ton = Decimal('0')
+        demo_tax_usd = Decimal('0')
+    
+    # Декабрь 2025: продажа 10 декабря 10000 TON (от покупки в ноябре) + покупка 11 декабря 1000 TON, продажа 12 декабря 1000 TON
+    elif year == 2025 and month == 12:
+        demo_deals = []
+        total_tax_ton = Decimal('0')
+        total_tax_usd = Decimal('0')
+        
+        # Сделка 1: Продажа от покупки в ноябре (6.11 купил 10000 TON, 10.12 продал)
+        amount_nov_ton = Decimal('10000')
+        buy_price_nov = ton_price_usd  # цена покупки в ноябре
+        sell_price_dec = (ton_price_usd * Decimal('1.10')).quantize(Decimal('0.00000001'))  # цена продажи в декабре (рост 10%)
+        
+        buy_usd_nov = amount_nov_ton * buy_price_nov
+        sell_usd_dec = amount_nov_ton * sell_price_dec
+        profit_usd_nov = sell_usd_dec - buy_usd_nov
+        
+        if profit_usd_nov > 0:
+            tax_usd_nov = (profit_usd_nov * TAX_RATE_PROFIT).quantize(Decimal('0.00000001'))
+        else:
+            tax_usd_nov = Decimal('0')
+        
+        tax_ton_nov = (tax_usd_nov / sell_price_dec).quantize(Decimal('0.000000001')) if tax_usd_nov > 0 else Decimal('0')
+        
+        demo_deals.append({
+            'operation_type': 'sell',
+            'date': '10.12.2025',
+            'amount_ton': float(amount_nov_ton),
+            'amount_usd': float(sell_usd_dec),
+            'price_usd': float(sell_price_dec),
+            'profit_ton': float((profit_usd_nov / sell_price_dec).quantize(Decimal('0.000000001'))) if profit_usd_nov > 0 else 0.0,
+            'profit_usd': float(profit_usd_nov),
+            'tax_rate': float(TAX_RATE_PROFIT),
+            'tax_amount_ton': float(tax_ton_nov),
+            'tax_amount_usd': float(tax_usd_nov),
+        })
+        
+        total_tax_ton += tax_ton_nov
+        total_tax_usd += tax_usd_nov
+        
+        # Сделка 2: Покупка 11 декабря 1000 TON, продажа 12 декабря 1000 TON
+        amount_dec_ton = Decimal('1000')
+        buy_price_dec = ton_price_usd
+        sell_price_dec2 = (ton_price_usd * Decimal('1.10')).quantize(Decimal('0.00000001'))
+        
+        buy_usd_dec = amount_dec_ton * buy_price_dec
+        sell_usd_dec2 = amount_dec_ton * sell_price_dec2
+        profit_usd_dec = sell_usd_dec2 - buy_usd_dec
+        
+        if profit_usd_dec > 0:
+            tax_usd_dec = (profit_usd_dec * TAX_RATE_PROFIT).quantize(Decimal('0.00000001'))
+        else:
+            tax_usd_dec = Decimal('0')
+        
+        tax_ton_dec = (tax_usd_dec / sell_price_dec2).quantize(Decimal('0.000000001')) if tax_usd_dec > 0 else Decimal('0')
+        
+        demo_deals.append({
+            'operation_type': 'buy',
+            'date': '11.12.2025',
+            'amount_ton': float(amount_dec_ton),
+            'amount_usd': float(buy_usd_dec),
+            'price_usd': float(buy_price_dec),
+            'profit_ton': 0.0,
+            'profit_usd': 0.0,
+            'tax_rate': float(TAX_RATE_PROFIT),
+            'tax_amount_ton': 0.0,
+            'tax_amount_usd': 0.0,
+        })
+        
+        demo_deals.append({
+            'operation_type': 'sell',
+            'date': '12.12.2025',
+            'amount_ton': float(amount_dec_ton),
+            'amount_usd': float(sell_usd_dec2),
+            'price_usd': float(sell_price_dec2),
+            'profit_ton': float((profit_usd_dec / sell_price_dec2).quantize(Decimal('0.000000001'))) if profit_usd_dec > 0 else 0.0,
+            'profit_usd': float(profit_usd_dec),
+            'tax_rate': float(TAX_RATE_PROFIT),
+            'tax_amount_ton': float(tax_ton_dec),
+            'tax_amount_usd': float(tax_usd_dec),
+        })
+        
+        total_tax_ton += tax_ton_dec
+        total_tax_usd += tax_usd_dec
+        
+        demo_tax_ton = total_tax_ton
+        demo_tax_usd = total_tax_usd
+        
+        # Добавляем объем продаж из демо-сделок к total_sent
+        for deal in demo_deals:
+            if deal['operation_type'] == 'sell':
+                total_sent_ton += Decimal(str(deal['amount_ton']))
+                total_sent_usd += Decimal(str(deal['amount_usd']))
 
     return {
         'year': year,
@@ -214,7 +389,7 @@ def calculate_tax_for_month(wallet_address, year, month, ton_price_usd=None):
         'total_sent_usd': float(total_sent_usd),
         'total_tax_ton': float(demo_tax_ton),
         'total_tax_usd': float(demo_tax_usd),
-        'transactions_count': len(transactions_detail),
+        'transactions_count': len(transactions_detail) + len([d for d in demo_deals if d.get('operation_type')]),
         'transactions': transactions_detail,
         'demo_deals': demo_deals,
     }
@@ -225,23 +400,33 @@ def calculate_tax_for_all_months(wallet_address, start_year=None, start_month=No
         wallet_address=wallet_address
     ).order_by('timestamp').first()
     
-    if not first_tx:
-        return []
-    
     last_tx = TransactionHistory.objects.filter(
         wallet_address=wallet_address
     ).order_by('-timestamp').first()
     
-    if not last_tx:
-        return []
-    
+    # Если указаны start_year и start_month, используем их
+    # Если не указаны, но есть транзакции в БД - используем их
+    # Если не указаны и нет транзакций, но есть демо-сделки - используем период с демо-сделками (август-декабрь 2025)
     if start_year is None:
-        start_year = first_tx.timestamp.year
+        if first_tx:
+            start_year = first_tx.timestamp.year
+        else:
+            # Если нет транзакций, но есть демо-сделки, начинаем с августа 2025
+            start_year = 2025
     if start_month is None:
-        start_month = first_tx.timestamp.month
+        if first_tx:
+            start_month = first_tx.timestamp.month
+        else:
+            # Если нет транзакций, но есть демо-сделки, начинаем с августа 2025
+            start_month = 8
     
-    end_year = last_tx.timestamp.year
-    end_month = last_tx.timestamp.month
+    if last_tx:
+        end_year = last_tx.timestamp.year
+        end_month = last_tx.timestamp.month
+    else:
+        # Если нет транзакций, но есть демо-сделки, заканчиваем декабрем 2025
+        end_year = 2025
+        end_month = 12
     
     if ton_price_usd is None:
         ton_price_usd = get_ton_price_usd()

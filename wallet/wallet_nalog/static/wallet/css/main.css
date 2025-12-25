@@ -803,6 +803,38 @@ body {
     word-break: break-all;
 }
 
+/* Demo transaction styles */
+.transaction-item.demo-transaction {
+    border-left: 4px solid var(--warning);
+    background: rgba(245, 158, 11, 0.05);
+}
+
+.transaction-item.demo-transaction:hover {
+    background: rgba(245, 158, 11, 0.1);
+}
+
+.transaction-icon.demo {
+    background: rgba(245, 158, 11, 0.15) !important;
+    color: var(--warning) !important;
+}
+
+.transaction-type.demo-type {
+    color: var(--warning);
+    font-weight: 600;
+}
+
+.transaction-profit {
+    font-weight: 500;
+}
+
+.transaction-profit.profit-positive {
+    color: var(--success);
+}
+
+.transaction-profit.profit-negative {
+    color: var(--error);
+}
+
 /* ============================================
    Tax Page
    ============================================ */

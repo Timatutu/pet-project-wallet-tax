@@ -15,8 +15,244 @@ import json
 import os
 import logging
 import threading
+from datetime import datetime, timezone
+from decimal import Decimal
+import requests
 
 logger = logging.getLogger(__name__)
+
+
+def get_ton_price_usd():
+    """Получить текущую цену TON в USD"""
+    try:
+        response = requests.get(
+            'https://api.coingecko.com/api/v3/simple/price?ids=the-open-network&vs_currencies=usd',
+            timeout=10
+        )
+        if response.status_code == 200:
+            data = response.json()
+            price = data.get('the-open-network', {}).get('usd')
+            if price:
+                return float(price)
+    except Exception:
+        pass
+    return 1.55  # Запасной курс
+
+
+def get_ton_price_for_date(date_str):
+    """
+    Получить цену TON в USD для конкретной даты.
+    Использует CoinGecko API для исторических данных или реалистичную симуляцию на основе реальных данных.
+    Формат date_str: 'YYYY-MM-DD'
+    """
+    from datetime import datetime as dt
+    current_price = get_ton_price_usd()
+    
+    try:
+        date_obj = dt.strptime(date_str, '%Y-%m-%d')
+        today = dt.now()
+        
+        # Если дата в прошлом, пытаемся получить историческую цену из CoinGecko
+        if date_obj < today:
+            # Конвертируем дату в формат для CoinGecko (DD-MM-YYYY)
+            date_formatted = date_obj.strftime('%d-%m-%Y')
+            response = requests.get(
+                f'https://api.coingecko.com/api/v3/coins/the-open-network/history?date={date_formatted}',
+                timeout=10
+            )
+            if response.status_code == 200:
+                data = response.json()
+                # Правильный путь к цене в CoinGecko API
+                price = data.get('market_data', {}).get('current_price', {}).get('usd')
+                if not price:
+                    # Альтернативный путь
+                    price = data.get('market_data', {}).get('current_price')
+                    if isinstance(price, dict):
+                        price = price.get('usd')
+                if price:
+                    return float(price)
+    except Exception as e:
+        logger.warning(f"Не удалось получить историческую цену для {date_str}: {e}")
+    
+    # Для будущих дат (2025) используем реалистичную симуляцию
+    # Берем текущую цену TON из API как базу и применяем реалистичные изменения
+    
+    # Определяем месяц для базового тренда (имитация реального роста/падения)
+    year_month = date_str[:7]  # 'YYYY-MM'
+    # Базовые множители для разных месяцев (основаны на типичных паттернах криптовалют)
+    month_multipliers = {
+        '2025-08': 0.94,  # Август - небольшое снижение
+        '2025-09': 1.03,  # Сентябрь - небольшой рост
+        '2025-11': 1.09,  # Ноябрь - рост
+        '2025-12': 1.15,  # Декабрь - еще больший рост
+    }
+    month_mult = month_multipliers.get(year_month, 1.0)
+    
+    # Добавляем дневные колебания для реалистичности
+    # Используем детерминированный, но реалистичный подход на основе даты
+    day = int(date_str.split('-')[2])
+    year = int(date_str.split('-')[0])
+    month = int(date_str.split('-')[1])
+    
+    # Создаем более сложный seed на основе всех компонентов даты
+    date_seed = (year * 10000 + month * 100 + day) % 1000000
+    # Дневные колебания от -2% до +2%
+    day_variation = 0.98 + ((date_seed % 40) / 1000.0)  # 0.98 - 1.02
+    
+    # Добавляем микро-вариации для большей реалистичности
+    # Используем более сложную формулу для получения нецелых значений
+    micro_seed = (date_seed * 7 + day * 13 + month * 17) % 10000
+    micro_variation = 0.9985 + (micro_seed / 20000.0)  # 0.9985 - 1.0015
+    
+    # Итоговая цена с учетом всех факторов
+    final_price = current_price * month_mult * day_variation * micro_variation
+    
+    # Округляем до 4 знаков после запятой для реалистичности (как в реальных API)
+    # Это даст более реалистичные цены типа 5.2347, а не 5.20
+    return round(final_price, 4)
+
+
+
+def get_demo_transactions(wallet_address):
+    """
+    Генерирует демо-транзакции (выдуманные покупки и продажи) для отображения в списке транзакций.
+    
+    Транзакции:
+    - Купил 12 августа 2025 5000 TON, продал 25 августа 2025
+    - Купил 6 ноября 2025 10000 TON, продал 10 декабря 2025
+    - Купил 1 сентября 2025 7500 TON, продал 19 сентября 2025
+    """
+    demo_transactions = []
+    ton_price_usd = get_ton_price_usd()
+    
+    # Нормализуем адрес для использования в транзакциях
+    try:
+        normalized_address = Address(wallet_address).to_str(is_bounceable=False)
+    except Exception:
+        normalized_address = wallet_address
+    
+    # Демо-транзакция 1: Покупка 12 августа 2025, 5000 TON
+    amount_1 = 5000.0
+    buy_price_1 = get_ton_price_for_date('2025-08-12')
+    buy_usd_1 = round(amount_1 * buy_price_1, 2)
+    
+    demo_transactions.append({
+        'tx_hash': 'DEMO-BUY-2025-08-12-5000',
+        'timestamp': datetime(2025, 8, 12, 12, 0, 0, tzinfo=timezone.utc).isoformat(),
+        'amount': amount_1,
+        'amount_ton': '5000.000000000',
+        'amount_usd': buy_usd_1,
+        'from_address': 'DEMO-EXCHANGE',
+        'to_address': normalized_address,
+        'status': 'completed',
+        'created_at': datetime.now(timezone.utc).isoformat(),
+        'is_demo': True,
+        'operation_type': 'buy',
+        'profit_usd': 0.0,
+    })
+    
+    # Демо-транзакция 1: Продажа 25 августа 2025, 5000 TON
+    sell_price_1 = get_ton_price_for_date('2025-08-25')
+    sell_usd_1 = round(amount_1 * sell_price_1, 2)
+    profit_usd_1 = round(sell_usd_1 - buy_usd_1, 2)
+    
+    demo_transactions.append({
+        'tx_hash': 'DEMO-SELL-2025-08-25-5000',
+        'timestamp': datetime(2025, 8, 25, 14, 30, 0, tzinfo=timezone.utc).isoformat(),
+        'amount': amount_1,
+        'amount_ton': '5000.000000000',
+        'amount_usd': sell_usd_1,
+        'from_address': normalized_address,
+        'to_address': 'DEMO-EXCHANGE',
+        'status': 'completed',
+        'created_at': datetime.now(timezone.utc).isoformat(),
+        'is_demo': True,
+        'operation_type': 'sell',
+        'profit_usd': profit_usd_1,
+    })
+    
+    # Демо-транзакция 2: Покупка 1 сентября 2025, 7500 TON
+    amount_2 = 7500.0
+    buy_price_2 = get_ton_price_for_date('2025-09-01')
+    buy_usd_2 = round(amount_2 * buy_price_2, 2)
+    
+    demo_transactions.append({
+        'tx_hash': 'DEMO-BUY-2025-09-01-7500',
+        'timestamp': datetime(2025, 9, 1, 10, 15, 0, tzinfo=timezone.utc).isoformat(),
+        'amount': amount_2,
+        'amount_ton': '7500.000000000',
+        'amount_usd': buy_usd_2,
+        'from_address': 'DEMO-EXCHANGE',
+        'to_address': normalized_address,
+        'status': 'completed',
+        'created_at': datetime.now(timezone.utc).isoformat(),
+        'is_demo': True,
+        'operation_type': 'buy',
+        'profit_usd': 0.0,
+    })
+    
+    # Демо-транзакция 2: Продажа 19 сентября 2025, 7500 TON
+    sell_price_2 = get_ton_price_for_date('2025-09-19')
+    sell_usd_2 = round(amount_2 * sell_price_2, 2)
+    profit_usd_2 = round(sell_usd_2 - buy_usd_2, 2)
+    
+    demo_transactions.append({
+        'tx_hash': 'DEMO-SELL-2025-09-19-7500',
+        'timestamp': datetime(2025, 9, 19, 16, 45, 0, tzinfo=timezone.utc).isoformat(),
+        'amount': amount_2,
+        'amount_ton': '7500.000000000',
+        'amount_usd': sell_usd_2,
+        'from_address': normalized_address,
+        'to_address': 'DEMO-EXCHANGE',
+        'status': 'completed',
+        'created_at': datetime.now(timezone.utc).isoformat(),
+        'is_demo': True,
+        'operation_type': 'sell',
+        'profit_usd': profit_usd_2,
+    })
+    
+    # Демо-транзакция 3: Покупка 6 ноября 2025, 10000 TON
+    amount_3 = 10000.0
+    buy_price_3 = get_ton_price_for_date('2025-11-06')
+    buy_usd_3 = round(amount_3 * buy_price_3, 2)
+    
+    demo_transactions.append({
+        'tx_hash': 'DEMO-BUY-2025-11-06-10000',
+        'timestamp': datetime(2025, 11, 6, 9, 0, 0, tzinfo=timezone.utc).isoformat(),
+        'amount': amount_3,
+        'amount_ton': '10000.000000000',
+        'amount_usd': buy_usd_3,
+        'from_address': 'DEMO-EXCHANGE',
+        'to_address': normalized_address,
+        'status': 'completed',
+        'created_at': datetime.now(timezone.utc).isoformat(),
+        'is_demo': True,
+        'operation_type': 'buy',
+        'profit_usd': 0.0,
+    })
+    
+    # Демо-транзакция 3: Продажа 10 декабря 2025, 10000 TON
+    sell_price_3 = get_ton_price_for_date('2025-12-10')
+    sell_usd_3 = round(amount_3 * sell_price_3, 2)
+    profit_usd_3 = round(sell_usd_3 - buy_usd_3, 2)
+    
+    demo_transactions.append({
+        'tx_hash': 'DEMO-SELL-2025-12-10-10000',
+        'timestamp': datetime(2025, 12, 10, 11, 20, 0, tzinfo=timezone.utc).isoformat(),
+        'amount': amount_3,
+        'amount_ton': '10000.000000000',
+        'amount_usd': sell_usd_3,
+        'from_address': normalized_address,
+        'to_address': 'DEMO-EXCHANGE',
+        'status': 'completed',
+        'created_at': datetime.now(timezone.utc).isoformat(),
+        'is_demo': True,
+        'operation_type': 'sell',
+        'profit_usd': profit_usd_3,
+    })
+    
+    return demo_transactions
+
 
 def wallet_test_page(request):
     return render(request, 'wallet_nalog/wallet_test.html')
@@ -402,13 +638,17 @@ def get_wallet_transactions(request):
             ).order_by('-timestamp')[:50]
             
             if db_transactions.exists():
+                ton_price = get_ton_price_usd()
                 transactions_data = []
                 for tx in db_transactions:
+                    amount_ton = float(tx.amount)
+                    amount_usd = amount_ton * ton_price
                     transactions_data.append({
                         'tx_hash': tx.tx_hash,
                         'timestamp': tx.timestamp.isoformat() if tx.timestamp else None,
-                        'amount': float(tx.amount),
+                        'amount': amount_ton,
                         'amount_ton': f"{tx.amount:.9f}",
+                        'amount_usd': amount_usd,
                         'from_address': normalize_address(tx.from_address),
                         'to_address': normalize_address(tx.to_address),
                         'status': tx.status,
@@ -416,6 +656,12 @@ def get_wallet_transactions(request):
                     })
                 
                 logger.info(f"Возвращаем {len(transactions_data)} транзакций из БД")
+                
+                # Добавляем демо-транзакции
+                demo_transactions = get_demo_transactions(normalized_wallet_address)
+                transactions_data.extend(demo_transactions)
+                # Сортируем по дате (новые сначала)
+                transactions_data.sort(key=lambda x: x['timestamp'] or '', reverse=True)
                 
                 def update_transactions_background():
                     try:
@@ -435,7 +681,8 @@ def get_wallet_transactions(request):
                     'count': len(transactions_data),
                     'loaded_from_blockchain': 0,
                     'saved_to_db': 0,
-                    'from_cache': True
+                    'from_cache': True,
+                    'demo_count': len(demo_transactions)
                 }, status=status.HTTP_200_OK)
         
         logger.info("Транзакций в БД нет, загружаем из блокчейна...")
@@ -451,13 +698,17 @@ def get_wallet_transactions(request):
         
         logger.info(f"Транзакций в БД для адреса {wallet_address}: {db_transactions.count()}")
         
+        ton_price = get_ton_price_usd()
         transactions_data = []
         for tx in db_transactions:
+            amount_ton = float(tx.amount)
+            amount_usd = amount_ton * ton_price
             transactions_data.append({
                 'tx_hash': tx.tx_hash,
                 'timestamp': tx.timestamp.isoformat() if tx.timestamp else None,
-                'amount': float(tx.amount),
+                'amount': amount_ton,
                 'amount_ton': f"{tx.amount:.9f}",
+                'amount_usd': amount_usd,
                 'from_address': normalize_address(tx.from_address),
                 'to_address': normalize_address(tx.to_address),
                 'status': tx.status,
@@ -466,12 +717,19 @@ def get_wallet_transactions(request):
         
         logger.info(f"Возвращаем {len(transactions_data)} транзакций")
         
+        # Добавляем демо-транзакции
+        demo_transactions = get_demo_transactions(normalized_wallet_address)
+        transactions_data.extend(demo_transactions)
+        # Сортируем по дате (новые сначала)
+        transactions_data.sort(key=lambda x: x['timestamp'] or '', reverse=True)
+        
         return Response({
             'transactions': transactions_data,
             'count': len(transactions_data),
             'loaded_from_blockchain': len(transactions),
             'saved_to_db': saved_count,
-            'from_cache': False
+            'from_cache': False,
+            'demo_count': len(demo_transactions)
         }, status=status.HTTP_200_OK)
     
     except Exception as e:

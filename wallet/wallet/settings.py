@@ -29,6 +29,13 @@ DEBUG = True
 # В продакшене укажите конкретные домены!
 ALLOWED_HOSTS = ['*']
 
+# CSRF trusted origins для ngrok и локальной разработки
+CSRF_TRUSTED_ORIGINS = [
+    'https://unsupervisory-unstatable-kristie.ngrok-free.dev',
+    'http://localhost:8009',
+    'http://127.0.0.1:8009',
+]
+
 
 # Application definition
 

@@ -492,7 +492,13 @@ async function loadTransactions(forceRefresh = false) {
             document.getElementById('total-transactions').textContent = data.count || data.transactions.length;
 
             data.transactions.forEach((tx) => {
-                const isOutgoing = normalizeAddress(tx.from_address) === normalizeAddress(walletAddress);
+                // Для демо-транзакций определяем isOutgoing по operation_type
+                let isOutgoing = false;
+                if (tx.is_demo && tx.operation_type) {
+                    isOutgoing = tx.operation_type === 'sell';
+                } else {
+                    isOutgoing = normalizeAddress(tx.from_address) === normalizeAddress(walletAddress);
+                }
                 const txElement = createTransactionElement(tx, isOutgoing);
                 container.appendChild(txElement);
             });
@@ -518,29 +524,73 @@ async function loadTransactions(forceRefresh = false) {
 // Create transaction element
 function createTransactionElement(tx, isOutgoing) {
     const div = document.createElement('div');
-    div.className = 'transaction-item';
+    const isDemo = tx.is_demo || false;
+    
+    // Для демо-транзакций определяем тип по operation_type
+    let transactionType = '';
+    let isOutgoingFinal = isOutgoing;
+    
+    if (isDemo && tx.operation_type) {
+        if (tx.operation_type === 'buy') {
+            transactionType = 'Покупка';
+            isOutgoingFinal = false;
+        } else if (tx.operation_type === 'sell') {
+            transactionType = 'Продажа';
+            isOutgoingFinal = true;
+        }
+    } else {
+        transactionType = isOutgoing ? 'Исходящая' : 'Входящая';
+    }
+    
+    div.className = `transaction-item ${isDemo ? 'demo-transaction' : ''}`;
     
     const date = tx.timestamp ? new Date(tx.timestamp).toLocaleString('ru-RU') : 'Неизвестно';
     const amount = parseFloat(tx.amount_ton || tx.amount || 0);
+    const amountUsd = parseFloat(tx.amount_usd || 0);
+    const profitUsd = parseFloat(tx.profit_usd || 0);
+    
+    // Формируем строку с прибылью/убытком для продаж или суммой в USD для покупок
+    let profitText = '';
+    if (isDemo && tx.operation_type === 'sell') {
+        // Для продаж показываем прибыль/убыток (profit_usd)
+        if (profitUsd !== undefined && profitUsd !== null) {
+            const profitSign = profitUsd >= 0 ? '+' : '';
+            const profitClass = profitUsd >= 0 ? 'profit-positive' : 'profit-negative';
+            profitText = `<div class="transaction-profit ${profitClass}" style="font-size: 12px; margin-top: 4px;">
+                ${profitSign}${profitUsd.toFixed(2)} USD
+            </div>`;
+        } else if (amountUsd > 0) {
+            // Если profit_usd нет, показываем сумму продажи
+            profitText = `<div class="transaction-amount-usd" style="font-size: 12px; color: var(--text-tertiary); margin-top: 4px;">
+                ${amountUsd.toFixed(2)} USD
+            </div>`;
+        }
+    } else if ((isDemo && tx.operation_type === 'buy' && amountUsd > 0) || (!isDemo && amountUsd > 0)) {
+        // Для покупок и обычных транзакций показываем сумму в USD
+        profitText = `<div class="transaction-amount-usd" style="font-size: 12px; color: var(--text-tertiary); margin-top: 4px;">
+            ${amountUsd.toFixed(2)} USD
+        </div>`;
+    }
     
     div.innerHTML = `
         <div class="transaction-left">
-            <div class="transaction-icon ${isOutgoing ? 'outgoing' : 'incoming'}">
+            <div class="transaction-icon ${isOutgoingFinal ? 'outgoing' : 'incoming'} ${isDemo ? 'demo' : ''}">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    ${isOutgoing 
+                    ${isOutgoingFinal 
                         ? '<path d="M5 12h14M12 5l7 7-7 7"/>'
                         : '<path d="M19 12H5M12 5l-7 7 7 7"/>'
                     }
                 </svg>
             </div>
             <div class="transaction-info">
-                <div class="transaction-type">${isOutgoing ? 'Исходящая' : 'Входящая'}</div>
+                <div class="transaction-type ${isDemo ? 'demo-type' : ''}">${transactionType}</div>
                 <div class="transaction-date">${date}</div>
                 <div class="transaction-hash">${tx.tx_hash || 'N/A'}</div>
             </div>
         </div>
-        <div class="transaction-amount ${isOutgoing ? 'negative' : 'positive'}">
-            ${isOutgoing ? '-' : '+'}${Math.abs(amount).toFixed(9)} TON
+        <div class="transaction-amount ${isOutgoingFinal ? 'negative' : 'positive'}">
+            ${isOutgoingFinal ? '-' : '+'}${Math.abs(amount).toFixed(9)} TON
+            ${profitText}
         </div>
     `;
     
@@ -600,10 +650,10 @@ async function loadTaxForMonth() {
                 <div class="tax-summary-item">
                     <div class="tax-summary-label">Налог к уплате</div>
                     <div class="tax-summary-value" style="color: var(--warning);">
-                        ${(tax.total_tax_ton || 0).toFixed(2)} TON
+                        ${(tax.total_tax_usd || 0).toFixed(2)} USD
                     </div>
                     <div style="font-size: 12px; color: var(--text-tertiary); margin-top: 4px;">
-                        ${(tax.total_tax_usd || 0).toFixed(2)} USD
+                        ${(tax.total_tax_ton || 0).toFixed(2)} TON
                     </div>
                 </div>
             </div>
@@ -611,7 +661,7 @@ async function loadTaxForMonth() {
 
         // Update total tax on dashboard
         document.getElementById('total-tax').textContent = 
-            `${(tax.total_tax_ton || 0).toFixed(2)} TON`;
+            `${(tax.total_tax_usd || 0).toFixed(2)} USD`;
     } catch (error) {
         resultsDiv.innerHTML = `
             <div class="empty-state">
@@ -667,7 +717,7 @@ async function loadTaxForAllMonths() {
                     onclick="showMonthlyTaxDetail(${idx})" 
                     onmouseover="this.style.background='var(--surface-hover)'" 
                     onmouseout="this.style.background='var(--surface-elevated)'">
-                    <strong>${m}.${y}</strong> — налог ${taxTon.toFixed(2)} TON (${taxUsd.toFixed(2)} USD)
+                    <strong>${m}.${y}</strong> — налог ${taxUsd.toFixed(2)} USD (${taxTon.toFixed(2)} TON)
                 </li>
             `;
         });
@@ -721,10 +771,10 @@ async function loadTotalTax() {
                 <div class="tax-summary-item">
                     <div class="tax-summary-label">Итоговый налог</div>
                     <div class="tax-summary-value" style="color: var(--warning); font-size: 28px;">
-                        ${(tax.total_tax_ton || tax.total_tax || 0).toFixed(2)} TON
+                        ${(tax.total_tax_usd || 0).toFixed(2)} USD
                     </div>
                     <div style="font-size: 12px; color: var(--text-tertiary); margin-top: 4px;">
-                        ${(tax.total_tax_usd || 0).toFixed(2)} USD
+                        ${(tax.total_tax_ton || tax.total_tax || 0).toFixed(2)} TON
                     </div>
                 </div>
             </div>
@@ -780,10 +830,10 @@ function showMonthlyTaxDetail(index) {
             <div class="tax-summary-item">
                 <div class="tax-summary-label">Налог к уплате</div>
                 <div class="tax-summary-value" style="color: var(--warning);">
-                    ${(item.total_tax_ton || 0).toFixed(2)} TON
+                    ${(item.total_tax_usd || 0).toFixed(2)} USD
                 </div>
                 <div style="font-size: 12px; color: var(--text-tertiary); margin-top: 4px;">
-                    ${(item.total_tax_usd || 0).toFixed(2)} USD
+                    ${(item.total_tax_ton || 0).toFixed(2)} TON
                 </div>
             </div>
         </div>
