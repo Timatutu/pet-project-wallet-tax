@@ -823,6 +823,36 @@ body {
     font-weight: 600;
 }
 
+/* Подсветка транзакций: покупка - зеленый, продажа - красный */
+.transaction-item.transaction-buy {
+    border-left-color: var(--success);
+    background: rgba(16, 185, 129, 0.08);
+}
+
+.transaction-item.transaction-buy:hover {
+    background: rgba(16, 185, 129, 0.12);
+}
+
+.transaction-item.transaction-sell {
+    border-left-color: var(--error);
+    background: rgba(239, 68, 68, 0.08);
+}
+
+.transaction-item.transaction-sell:hover {
+    background: rgba(239, 68, 68, 0.12);
+}
+
+/* Обновляем иконки для покупки и продажи */
+.transaction-item.transaction-buy .transaction-icon {
+    background: rgba(16, 185, 129, 0.15) !important;
+    color: var(--success) !important;
+}
+
+.transaction-item.transaction-sell .transaction-icon {
+    background: rgba(239, 68, 68, 0.15) !important;
+    color: var(--error) !important;
+}
+
 .transaction-profit {
     font-weight: 500;
 }

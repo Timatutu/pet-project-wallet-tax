@@ -36,7 +36,7 @@ def get_ton_price_usd():
                 return float(price)
     except Exception:
         pass
-    return 1.55  # Запасной курс
+    return 5.0
 
 
 def get_ton_price_for_date(date_str):
@@ -52,9 +52,7 @@ def get_ton_price_for_date(date_str):
         date_obj = dt.strptime(date_str, '%Y-%m-%d')
         today = dt.now()
         
-        # Если дата в прошлом, пытаемся получить историческую цену из CoinGecko
         if date_obj < today:
-            # Конвертируем дату в формат для CoinGecko (DD-MM-YYYY)
             date_formatted = date_obj.strftime('%d-%m-%Y')
             response = requests.get(
                 f'https://api.coingecko.com/api/v3/coins/the-open-network/history?date={date_formatted}',
@@ -62,10 +60,8 @@ def get_ton_price_for_date(date_str):
             )
             if response.status_code == 200:
                 data = response.json()
-                # Правильный путь к цене в CoinGecko API
                 price = data.get('market_data', {}).get('current_price', {}).get('usd')
                 if not price:
-                    # Альтернативный путь
                     price = data.get('market_data', {}).get('current_price')
                     if isinstance(price, dict):
                         price = price.get('usd')
@@ -74,41 +70,27 @@ def get_ton_price_for_date(date_str):
     except Exception as e:
         logger.warning(f"Не удалось получить историческую цену для {date_str}: {e}")
     
-    # Для будущих дат (2025) используем реалистичную симуляцию
-    # Берем текущую цену TON из API как базу и применяем реалистичные изменения
-    
-    # Определяем месяц для базового тренда (имитация реального роста/падения)
-    year_month = date_str[:7]  # 'YYYY-MM'
-    # Базовые множители для разных месяцев (основаны на типичных паттернах криптовалют)
+    year_month = date_str[:7]
     month_multipliers = {
-        '2025-08': 0.94,  # Август - небольшое снижение
-        '2025-09': 1.03,  # Сентябрь - небольшой рост
-        '2025-11': 1.09,  # Ноябрь - рост
-        '2025-12': 1.15,  # Декабрь - еще больший рост
+        '2025-08': 0.94,
+        '2025-09': 1.03,
+        '2025-11': 1.09,
+        '2025-12': 1.15,
     }
     month_mult = month_multipliers.get(year_month, 1.0)
     
-    # Добавляем дневные колебания для реалистичности
-    # Используем детерминированный, но реалистичный подход на основе даты
     day = int(date_str.split('-')[2])
     year = int(date_str.split('-')[0])
     month = int(date_str.split('-')[1])
     
-    # Создаем более сложный seed на основе всех компонентов даты
     date_seed = (year * 10000 + month * 100 + day) % 1000000
-    # Дневные колебания от -2% до +2%
-    day_variation = 0.98 + ((date_seed % 40) / 1000.0)  # 0.98 - 1.02
+    day_variation = 0.98 + ((date_seed % 40) / 1000.0)
     
-    # Добавляем микро-вариации для большей реалистичности
-    # Используем более сложную формулу для получения нецелых значений
     micro_seed = (date_seed * 7 + day * 13 + month * 17) % 10000
-    micro_variation = 0.9985 + (micro_seed / 20000.0)  # 0.9985 - 1.0015
+    micro_variation = 0.9985 + (micro_seed / 20000.0)
     
-    # Итоговая цена с учетом всех факторов
     final_price = current_price * month_mult * day_variation * micro_variation
     
-    # Округляем до 4 знаков после запятой для реалистичности (как в реальных API)
-    # Это даст более реалистичные цены типа 5.2347, а не 5.20
     return round(final_price, 4)
 
 
@@ -125,13 +107,11 @@ def get_demo_transactions(wallet_address):
     demo_transactions = []
     ton_price_usd = get_ton_price_usd()
     
-    # Нормализуем адрес для использования в транзакциях
     try:
         normalized_address = Address(wallet_address).to_str(is_bounceable=False)
     except Exception:
         normalized_address = wallet_address
     
-    # Демо-транзакция 1: Покупка 12 августа 2025, 5000 TON
     amount_1 = 5000.0
     buy_price_1 = get_ton_price_for_date('2025-08-12')
     buy_usd_1 = round(amount_1 * buy_price_1, 2)
@@ -151,7 +131,6 @@ def get_demo_transactions(wallet_address):
         'profit_usd': 0.0,
     })
     
-    # Демо-транзакция 1: Продажа 25 августа 2025, 5000 TON
     sell_price_1 = get_ton_price_for_date('2025-08-25')
     sell_usd_1 = round(amount_1 * sell_price_1, 2)
     profit_usd_1 = round(sell_usd_1 - buy_usd_1, 2)
@@ -171,7 +150,6 @@ def get_demo_transactions(wallet_address):
         'profit_usd': profit_usd_1,
     })
     
-    # Демо-транзакция 2: Покупка 1 сентября 2025, 7500 TON
     amount_2 = 7500.0
     buy_price_2 = get_ton_price_for_date('2025-09-01')
     buy_usd_2 = round(amount_2 * buy_price_2, 2)
@@ -191,7 +169,6 @@ def get_demo_transactions(wallet_address):
         'profit_usd': 0.0,
     })
     
-    # Демо-транзакция 2: Продажа 19 сентября 2025, 7500 TON
     sell_price_2 = get_ton_price_for_date('2025-09-19')
     sell_usd_2 = round(amount_2 * sell_price_2, 2)
     profit_usd_2 = round(sell_usd_2 - buy_usd_2, 2)
@@ -211,7 +188,6 @@ def get_demo_transactions(wallet_address):
         'profit_usd': profit_usd_2,
     })
     
-    # Демо-транзакция 3: Покупка 6 ноября 2025, 10000 TON
     amount_3 = 10000.0
     buy_price_3 = get_ton_price_for_date('2025-11-06')
     buy_usd_3 = round(amount_3 * buy_price_3, 2)
@@ -231,7 +207,6 @@ def get_demo_transactions(wallet_address):
         'profit_usd': 0.0,
     })
     
-    # Демо-транзакция 3: Продажа 10 декабря 2025, 10000 TON
     sell_price_3 = get_ton_price_for_date('2025-12-10')
     sell_usd_3 = round(amount_3 * sell_price_3, 2)
     profit_usd_3 = round(sell_usd_3 - buy_usd_3, 2)
@@ -261,7 +236,6 @@ def index_page(request):
     return render(request, 'wallet_nalog/index.html')
 
 def tonconnect_manifest(request):
-    # Обработка OPTIONS запроса для CORS preflight
     if request.method == 'OPTIONS':
         response = JsonResponse({})
         response['Access-Control-Allow-Origin'] = '*'
@@ -270,29 +244,22 @@ def tonconnect_manifest(request):
         response['Access-Control-Max-Age'] = '3600'
         return response
     
-    # Получаем базовый URL из запроса
-    # Важно: для ngrok используем HTTPS
     protocol = 'https' if request.is_secure() or 'ngrok' in request.get_host() else 'http'
     host = request.get_host()
     base_url = f"{protocol}://{host}"
     
-    # Формируем манифест согласно спецификации TON Connect
-    # Обязательные поля: url, name, iconUrl
     manifest = {
         "url": base_url,
         "name": "TON Wallet Test",
         "iconUrl": "https://ton.org/favicon.ico"
     }
     
-    # Создаем JSON ответ без дополнительных параметров форматирования
     response = JsonResponse(manifest)
     response['Content-Type'] = 'application/json'
-    # CORS заголовки для TON Connect (критично для мобильных приложений)
     response['Access-Control-Allow-Origin'] = '*'
     response['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
     response['Access-Control-Allow-Headers'] = 'Content-Type, Accept, Origin'
     response['Access-Control-Max-Age'] = '3600'
-    # Отключаем кеширование для манифеста
     response['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     response['Pragma'] = 'no-cache'
     response['Expires'] = '0'
@@ -317,7 +284,6 @@ def Login(request):
     serializer = UserLoginSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     user = serializer.validated_data['user']
-    # Для JWT аутентификации сессионный login не требуется
     tokens = user.generate_tokens()
     response_serializer = UserSerializer(user, context={'request': request})
     response_data = response_serializer.data
@@ -344,7 +310,6 @@ def RefreshToken(request):
             status=status.HTTP_401_UNAUTHORIZED
         )
     
-    # Генерируем новые токены
     tokens = user.generate_tokens()
     
     return Response({
@@ -360,15 +325,12 @@ def connect_wallet(request):
             serializer = WalletSessionSerializer(wallet_session)
             data = serializer.data
 
-            # Нормализуем адрес кошелька в формат UQ... (base64, non-bounceable),
-            # чтобы он совпадал с адресом в Tonkeeper.
             raw_address = wallet_session.wallet_address
             try:
                 addr_obj = Address(raw_address)
                 friendly_address = addr_obj.to_str(is_bounceable=False)
                 data['wallet_address'] = friendly_address
             except Exception:
-                # Если что‑то пошло не так, оставляем как есть
                 pass
 
             return Response(data, status=status.HTTP_200_OK)
@@ -423,7 +385,6 @@ def get_tax_for_month(request):
             {'error': 'Кошелек не подключен'},
             status=status.HTTP_400_BAD_REQUEST
         )
-    # Нормализуем адрес в тот же формат, в котором он хранится в БД (UQ...)
     wallet_address = wallet_session.wallet_address
     try:
         wallet_address = Address(wallet_address).to_str(is_bounceable=False)
@@ -474,7 +435,6 @@ def get_tax_for_all_months(request):
             {'error': 'Кошелек не подключен'},
             status=status.HTTP_400_BAD_REQUEST
         )
-    # Нормализуем адрес в формат UQ..., чтобы совпадал с записями TransactionHistory
     wallet_address = wallet_session.wallet_address
     try:
         wallet_address = Address(wallet_address).to_str(is_bounceable=False)
@@ -528,7 +488,6 @@ def get_total_tax(request):
             {'error': 'Кошелек не подключен'},
             status=status.HTTP_400_BAD_REQUEST
         )
-    # Нормализуем адрес в формат UQ..., как в TransactionHistory
     wallet_address = wallet_session.wallet_address
     try:
         wallet_address = Address(wallet_address).to_str(is_bounceable=False)
@@ -620,8 +579,6 @@ def get_wallet_transactions(request):
     
     try:
         logger.info(f"Запрос транзакций для адреса: {wallet_address}, force_refresh: {force_refresh}")
-        # Нормализуем адрес в удобный формат (UQ...) и дальше ВСЮДЫ используем его –
-        # и для выборки из БД, и для сохранения, и для ответа фронту.
         def normalize_address(addr: str) -> str:
             if not addr:
                 return ''
@@ -657,10 +614,8 @@ def get_wallet_transactions(request):
                 
                 logger.info(f"Возвращаем {len(transactions_data)} транзакций из БД")
                 
-                # Добавляем демо-транзакции
                 demo_transactions = get_demo_transactions(normalized_wallet_address)
                 transactions_data.extend(demo_transactions)
-                # Сортируем по дате (новые сначала)
                 transactions_data.sort(key=lambda x: x['timestamp'] or '', reverse=True)
                 
                 def update_transactions_background():
@@ -717,10 +672,8 @@ def get_wallet_transactions(request):
         
         logger.info(f"Возвращаем {len(transactions_data)} транзакций")
         
-        # Добавляем демо-транзакции
         demo_transactions = get_demo_transactions(normalized_wallet_address)
         transactions_data.extend(demo_transactions)
-        # Сортируем по дате (новые сначала)
         transactions_data.sort(key=lambda x: x['timestamp'] or '', reverse=True)
         
         return Response({

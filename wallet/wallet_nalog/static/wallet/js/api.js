@@ -130,6 +130,21 @@ class APIClient {
         return { response, data };
     }
 
+    async disconnectWallet() {
+        const response = await this.fetchWithAuth(`${this.baseURL}/Wallet/`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                connected: false
+            })
+        });
+
+        const data = await response.json();
+        return { response, data };
+    }
+
     async getBalance() {
         const response = await this.fetchWithAuth(`${this.baseURL}/wallet/balance/`);
         const data = await response.json();

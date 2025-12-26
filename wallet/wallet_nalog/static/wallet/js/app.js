@@ -65,13 +65,12 @@ async function checkWalletConnection() {
         const { response, data } = await api.getWallet();
         
         if (response.ok && data.connected) {
-            walletAddress = data.wallet_address;
+            walletAddress = data.wallet_address ? normalizeAddress(data.wallet_address) : null;
             updateWalletStatus(true);
             document.getElementById('wallet-address').textContent = 
                 formatAddress(walletAddress);
             document.getElementById('wallet-status-text').textContent = 'Активен';
             await loadBalance();
-            // Auto-load transactions if wallet is connected
             await loadTransactions();
         } else {
             updateWalletStatus(false);
@@ -90,23 +89,31 @@ function updateWalletStatus(connected) {
     const statusText = document.querySelector('.status-text');
     const connectBtn = document.getElementById('connect-wallet-btn');
     
-    if (connected) {
-        statusDot.classList.add('connected');
-        statusText.textContent = 'Подключен';
-        if (connectBtn) {
+    if (connectBtn) {
+        connectBtn.onclick = null;
+        
+        if (connected) {
+            statusDot.classList.add('connected');
+            statusText.textContent = 'Подключен';
             connectBtn.textContent = 'Отключить кошелек';
             connectBtn.className = 'btn btn-danger';
-            connectBtn.onclick = disconnectWallet;
+            connectBtn.onclick = function() { disconnectWallet(); };
+            connectBtn.disabled = false;
+        } else {
+            statusDot.classList.remove('connected');
+            statusText.textContent = 'Не подключен';
+            connectBtn.textContent = 'Подключить кошелек';
+            connectBtn.className = 'btn btn-primary';
+            connectBtn.onclick = function() { connectTonkeeper(); };
             connectBtn.disabled = false;
         }
     } else {
-        statusDot.classList.remove('connected');
-        statusText.textContent = 'Не подключен';
-        if (connectBtn) {
-            connectBtn.textContent = 'Подключить кошелек';
-            connectBtn.className = 'btn btn-primary';
-            connectBtn.onclick = connectTonkeeper;
-            connectBtn.disabled = false;
+        if (connected) {
+            if (statusDot) statusDot.classList.add('connected');
+            if (statusText) statusText.textContent = 'Подключен';
+        } else {
+            if (statusDot) statusDot.classList.remove('connected');
+            if (statusText) statusText.textContent = 'Не подключен';
         }
     }
 }
@@ -367,10 +374,14 @@ async function disconnectWallet() {
             }
         }
 
-        // Clear wallet address and local state
+        try {
+            await api.disconnectWallet();
+        } catch (apiError) {
+            console.log('API disconnect error (ignored):', apiError);
+        }
+
         walletAddress = null;
         
-        // Update UI
         updateWalletStatus(false);
         const walletAddressEl = document.getElementById('wallet-address');
         const walletStatusTextEl = document.getElementById('wallet-status-text');
@@ -418,7 +429,7 @@ async function handleWalletConnected(wallet) {
     }
 
     const address = wallet.account.address;
-    walletAddress = address;
+    walletAddress = normalizeAddress(address);
 
     try {
         const { response, data } = await api.connectWallet(address, 'tonkeeper');
@@ -488,16 +499,49 @@ async function loadTransactions(forceRefresh = false) {
 
             container.innerHTML = '';
             
-            // Update total transactions count
             document.getElementById('total-transactions').textContent = data.count || data.transactions.length;
 
-            data.transactions.forEach((tx) => {
-                // Для демо-транзакций определяем isOutgoing по operation_type
+            if (!walletAddress) {
+                const { response: walletResponse, data: walletData } = await api.getWallet();
+                if (walletResponse.ok && walletData.connected && walletData.wallet_address) {
+                    walletAddress = normalizeAddress(walletData.wallet_address);
+                    console.log('Wallet address loaded:', walletAddress?.substring(0, 30));
+                }
+            }
+            
+            console.log('Current walletAddress:', walletAddress?.substring(0, 30));
+
+            data.transactions.forEach((tx, index) => {
                 let isOutgoing = false;
                 if (tx.is_demo && tx.operation_type) {
                     isOutgoing = tx.operation_type === 'sell';
+                } else if (walletAddress && tx.from_address) {
+                    const normalizedFrom = normalizeAddress(tx.from_address);
+                    const normalizedTo = normalizeAddress(tx.to_address || '');
+                    const normalizedWallet = normalizeAddress(walletAddress);
+                    
+                    // Проверяем, что from_address совпадает с walletAddress
+                    const fromMatches = normalizedFrom && normalizedWallet && normalizedFrom === normalizedWallet;
+                    // Проверяем, что to_address НЕ совпадает с walletAddress (чтобы исключить транзакции самому себе)
+                    const toMatches = normalizedTo && normalizedWallet && normalizedTo === normalizedWallet;
+                    
+                    isOutgoing = fromMatches && !toMatches;
+                    
+                    // Отладка для всех транзакций
+                    console.log(`Transaction ${index} direction check:`, {
+                        tx_hash: tx.tx_hash?.substring(0, 20),
+                        from_raw: tx.from_address?.substring(0, 30),
+                        from_normalized: normalizedFrom?.substring(0, 30),
+                        to_raw: tx.to_address?.substring(0, 30),
+                        to_normalized: normalizedTo?.substring(0, 30),
+                        wallet_raw: walletAddress?.substring(0, 30),
+                        wallet_normalized: normalizedWallet?.substring(0, 30),
+                        fromMatches,
+                        toMatches,
+                        isOutgoing
+                    });
                 } else {
-                    isOutgoing = normalizeAddress(tx.from_address) === normalizeAddress(walletAddress);
+                    console.warn(`Transaction ${index}: Cannot determine direction - walletAddress: ${!!walletAddress}, from_address: ${!!tx.from_address}`);
                 }
                 const txElement = createTransactionElement(tx, isOutgoing);
                 container.appendChild(txElement);
@@ -526,9 +570,8 @@ function createTransactionElement(tx, isOutgoing) {
     const div = document.createElement('div');
     const isDemo = tx.is_demo || false;
     
-    // Для демо-транзакций определяем тип по operation_type
     let transactionType = '';
-    let isOutgoingFinal = isOutgoing;
+    let isOutgoingFinal = false;
     
     if (isDemo && tx.operation_type) {
         if (tx.operation_type === 'buy') {
@@ -539,10 +582,29 @@ function createTransactionElement(tx, isOutgoing) {
             isOutgoingFinal = true;
         }
     } else {
-        transactionType = isOutgoing ? 'Исходящая' : 'Входящая';
+        isOutgoingFinal = isOutgoing === true;
+        transactionType = isOutgoingFinal ? 'Исходящая' : 'Входящая';
+        
+        // Отладка для реальных транзакций
+        if (!isDemo) {
+            console.log('createTransactionElement:', {
+                tx_hash: tx.tx_hash?.substring(0, 20),
+                isOutgoing,
+                isOutgoingFinal,
+                transactionType
+            });
+        }
     }
     
-    div.className = `transaction-item ${isDemo ? 'demo-transaction' : ''}`;
+    // Добавляем классы для подсветки: покупка - зеленый, продажа - красный
+    let operationClass = '';
+    if (isDemo && tx.operation_type) {
+        operationClass = tx.operation_type === 'buy' ? 'transaction-buy' : 'transaction-sell';
+    } else if (!isDemo) {
+        operationClass = isOutgoingFinal ? 'transaction-sell' : 'transaction-buy';
+    }
+    
+    div.className = `transaction-item ${isDemo ? 'demo-transaction' : ''} ${operationClass}`;
     
     const date = tx.timestamp ? new Date(tx.timestamp).toLocaleString('ru-RU') : 'Неизвестно';
     const amount = parseFloat(tx.amount_ton || tx.amount || 0);
@@ -597,10 +659,30 @@ function createTransactionElement(tx, isOutgoing) {
     return div;
 }
 
-// Normalize address
+// Normalize address - приводим к нижнему регистру и убираем пробелы
+// Адреса уже нормализованы на бэкенде в формат UQ... (non-bounceable)
 function normalizeAddress(addr) {
     if (!addr) return '';
-    return addr.toString().trim().toLowerCase();
+    let str = addr.toString().trim();
+    
+    // Убираем префиксы ton:, k:, u:, 0: и т.д.
+    str = str.replace(/^(ton|k|u|0):/i, '');
+    
+    // Убираем все пробелы
+    str = str.replace(/\s+/g, '');
+    
+    // Убираем дефисы и другие разделители
+    str = str.replace(/[-_]/g, '');
+    
+    // Приводим к нижнему регистру для сравнения
+    str = str.toLowerCase();
+    
+    // Убираем все не-алфавитно-цифровые символы, кроме базовых для адресов
+    // TON адреса обычно содержат только буквы, цифры и некоторые специальные символы
+    // Но для сравнения оставляем только буквы и цифры
+    str = str.replace(/[^a-z0-9]/g, '');
+    
+    return str;
 }
 
 // Load tax for month
